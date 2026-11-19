@@ -1,0 +1,163 @@
+from typing import Any
+
+import jax
+import jax.numpy as jnp
+from flax import struct
+
+from asl_rl.env import Environment, Observation
+
+
+@struct.dataclass
+class CartpoleState:
+    q: jnp.ndarray
+    v: jnp.ndarray
+    time: int
+
+
+class CartpoleEnv(Environment):
+    def __init__(self, swing_up: bool = False):
+        self.swing_up = swing_up
+
+        self.dt_physics = 0.01  # 100 Hz sim
+        self.decimation = 5  # 20 Hz control
+        self.max_steps = 1000  # 50 sec
+
+        # Cartpole params based on gymnax
+        self.action_scale = 10.0
+        self.pole_mass = 0.1
+        self.cart_mass = 1.0
+        self.gravity = 9.81
+        self.pole_halflength = 0.5
+
+        # Other helpful static intermediate terms
+        self.total_mass = self.pole_mass + self.cart_mass
+        self.pole_mass_x_halflength = self.pole_mass * self.pole_halflength
+
+        self.randomize_episode_phase = True
+
+    # Note: the reset logic is somewhat complicated, but this is just so that we
+    # can randomize the initial episode phase to avoid lockstep. For most examples,
+    # you can just define a single reset()
+
+    def reset(self, key: jax.Array, ctx=None) -> tuple[Observation, CartpoleState]:
+        key, phase_key = jax.random.split(key)
+        if self.randomize_episode_phase:
+            # Stagger initial episode phase
+            init_step = jax.random.randint(
+                phase_key, (), 0, self.max_steps, dtype=jnp.int32
+            )
+        else:
+            init_step = jnp.array(0, dtype=jnp.int32)
+        return self._reset(key, init_step)
+
+    def reset_from(
+        self, key: jax.Array, state: CartpoleState, ctx=None
+    ) -> tuple[Observation, CartpoleState]:
+        # At an episode boundary: start a full-length episode from step 0
+        del state
+        return self._reset(key, jnp.array(0, dtype=jnp.int32))
+
+    def _reset(
+        self, key: jax.Array, init_step: jax.Array
+    ) -> tuple[Observation, CartpoleState]:
+        key_q, key_v = jax.random.split(key)
+        q = jax.random.uniform(
+            key_q,
+            (2,),
+            minval=jnp.array([-0.1, -0.034]),
+            maxval=jnp.array([0.1, 0.034]),
+        )
+        if self.swing_up:
+            # Cart starts centered, pole hanging down
+            q = jnp.array([0.0, jnp.pi + q[1]])
+        v = jax.random.uniform(key_v, minval=-0.01, maxval=0.01, shape=(2,))
+
+        state = CartpoleState(q=q, v=v, time=init_step)
+        return self._get_obs(state), state
+
+    def step(
+        self, key: jax.Array, state: CartpoleState, action: jnp.ndarray, ctx=None
+    ) -> tuple[jnp.ndarray, CartpoleState, float, bool, bool, dict[str, Any]]:
+        action = jnp.clip(action, -1.0, 1.0)
+
+        # Joint efforts (only on the cart, no torque on the pole)
+        tau = jnp.array([action[0] * self.action_scale, 0.0])
+
+        def integration_step(carry, _):
+            q_curr, v_curr = carry
+
+            _x, theta = q_curr
+            _x_dot, theta_dot = v_curr
+            # Compute intermediate terms
+            sin_theta = jnp.sin(theta)
+            cos_theta = jnp.cos(theta)
+            force = tau[0]
+            temp = (
+                force + self.pole_mass_x_halflength * theta_dot**2 * sin_theta
+            ) / self.total_mass
+            thetaacc = (self.gravity * sin_theta - cos_theta * temp) / (
+                self.pole_halflength
+                * (4.0 / 3.0 - self.pole_mass * cos_theta**2 / self.total_mass)
+            )
+            xacc = (
+                temp
+                - self.pole_mass_x_halflength * thetaacc * cos_theta / self.total_mass
+            )
+            a = jnp.array([xacc, thetaacc])
+
+            # Semi-implicit euler
+            v_next = v_curr + a * self.dt_physics
+            q_next = q_curr + v_next * self.dt_physics
+
+            # Joint limits on slider
+            q_next = q_next.at[0].set(jnp.clip(q_next[0], -1.8, 1.8))
+            hit_limit = (q_next[0] <= -1.8) | (q_next[0] >= 1.8)
+            v_next = jnp.where(hit_limit, v_next.at[0].set(0.0), v_next)
+
+            return (q_next, v_next), None
+
+        (q_next, v_next), _ = jax.lax.scan(
+            integration_step, (state.q, state.v), None, length=self.decimation
+        )
+
+        next_state = CartpoleState(q=q_next, v=v_next, time=state.time + 1)
+        obs = self._get_obs(next_state)
+        reward = self._get_reward(next_state.q, next_state.v, action[0])
+        terminated = jnp.abs(next_state.q[0]) >= 1.8  # Hit end of rail
+        truncated = next_state.time >= self.max_steps
+        info = {}
+
+        return obs, next_state, reward, terminated, truncated, info
+
+    def _get_obs(self, state: CartpoleState) -> Observation:
+        obs = jnp.array(
+            [
+                state.q[0],
+                jnp.cos(state.q[1]),
+                jnp.sin(state.q[1]),
+                state.v[0],
+                state.v[1],
+            ]
+        )
+        return Observation.symmetric(obs)
+
+    def _get_reward(self, q: jnp.ndarray, v: jnp.ndarray, u: float) -> float:
+        upright = (jnp.cos(q[1]) + 1.0) / 2.0
+        centered = (1.0 + self._gaussian_tolerance(q[0], margin=2.0)) / 2.0
+        small_control = (4.0 + self._quadratic_tolerance(u, margin=1.0)) / 5.0
+        small_velocity = (1.0 + self._gaussian_tolerance(v[1], margin=5.0)) / 2.0
+        return upright * centered * small_control * small_velocity
+
+    def _gaussian_tolerance(self, x: float, margin: float) -> float:
+        gaussian_scale = jnp.sqrt(-2.0 * jnp.log(0.1))
+        scaled = (x / margin) * gaussian_scale
+        return jnp.exp(-0.5 * scaled**2)
+
+    def _quadratic_tolerance(self, x: float, margin: float) -> float:
+        quadratic_scale = jnp.sqrt(1.0 - 0.1)
+        scaled = (x / margin) * quadratic_scale
+        return jnp.maximum(0.0, 1.0 - scaled**2)
+
+    @property
+    def action_dim(self) -> int:
+        return 1

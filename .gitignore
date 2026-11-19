@@ -1,0 +1,25 @@
+# Python artifacts
+*.pyc
+__pycache__
+*.egg-info/
+build/
+dist/
+
+# Python venv management
+.python-version
+.venv/
+venv/
+
+# Editors
+.vscode/
+
+# Assorted
+MUJOCO_LOG.TXT
+untracked/
+temp/
+.claude/
+
+# Logging
+wandb/
+artifacts/
+logs/

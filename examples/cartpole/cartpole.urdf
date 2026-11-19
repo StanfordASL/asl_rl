@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<robot name="cartpole_1link">
+
+  <!-- ==================== WORLD ==================== -->
+  <link name="world">
+  <!-- TODO: this inertia should be not needed -->
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.00833" ixy="0" ixz="0"
+                             iyy="0.00833" iyz="0"
+                                           izz="0.01333"/>
+    </inertial>
+  </link>
+
+  <!-- Prismatic joint: cart slides along X -->
+  <joint name="slider" type="prismatic">
+    <parent link="world"/>
+    <child  link="cart"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1000.0" upper="1000.0" effort="1000.0" velocity="1000.0"/>
+  </joint>
+
+  <!-- ==================== CART ==================== -->
+  <link name="cart">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01083333" ixy="0" ixz="0"
+                             iyy="0.01666667" iyz="0"
+                                           izz="0.02083333"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.3 0.2"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.3 0.2"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ==================== LINK 1 ==================== -->
+  <joint name="joint1" type="revolute">
+    <parent link="cart"/>
+    <child  link="link1"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1000.0" upper="1000.0" effort="1000.0" velocity="1000.0"/>
+  </joint>
+
+  <link name="link1">
+    <inertial>
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.00838396" ixy="0" ixz="0"
+                            iyy="0.00838396" iyz="0"
+                                         izz="0.00010125"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="1.0"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.5" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="1.0"/>
+      </geometry>
+    </collision>
+  </link>
+
+</robot>

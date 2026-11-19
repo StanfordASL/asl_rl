@@ -1,0 +1,25 @@
+<!-- MJCF version of cartpole.urdf, with a force actuator on the slider -->
+<mujoco model="cartpole">
+  <option timestep="0.01">
+    <flag contact="disable"/>
+  </option>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="3 1 0.1" rgba="0.8 0.8 0.8 1"/>
+    <body name="cart" pos="0 0 0.1">
+      <joint name="slider" type="slide" axis="1 0 0" limited="true" range="-1.8 1.8"/>
+      <inertial pos="0 0 0" mass="1.0" diaginertia="0.01083333 0.01666667 0.02083333"/>
+      <geom type="box" size="0.2 0.15 0.1" rgba="0.3 0.3 0.8 1"/>
+      <body name="link1" pos="0 0 0.05">
+        <joint name="joint1" type="hinge" axis="0 1 0"/>
+        <inertial pos="0 0 0.5" mass="0.1" diaginertia="0.00838396 0.00838396 0.00010125"/>
+        <geom type="cylinder" fromto="0 0 0 0 0 1" size="0.045" rgba="0.8 0.3 0.3 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor joint="slider" gear="10" ctrlrange="-1 1" ctrllimited="true"/>
+  </actuator>
+</mujoco>
