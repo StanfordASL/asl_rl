@@ -12,7 +12,14 @@ from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 
 from asl_rl.config import PPOConfig
-from asl_rl.env import DEVICE_AXIS, AutoResetWrapper, LogWrapper, Observation, VecEnv
+from asl_rl.env import (
+    DEVICE_AXIS,
+    AutoResetWrapper,
+    LogWrapper,
+    Observation,
+    TimeLimitWrapper,
+    VecEnv,
+)
 from asl_rl.model import ActorCritic
 from asl_rl.normalizer import init_normalizer, normalize_obs, update_normalizer
 from asl_rl.ppo import Batch, calculate_gae, get_lr, make_optimizer, ppo_update
@@ -164,8 +171,15 @@ class OnPolicyRunner:
         self.log_dir = None if log_dir is None else str(log_dir)
         self.logger = logger
 
-        # Wrap environment with LogWrapper and AutoResetWrapper
-        log_env = LogWrapper(env)
+        # Wrap environment with (TimeLimitWrapper,) LogWrapper and AutoResetWrapper
+        max_episode_length = getattr(env, "max_episode_length", None)
+        if max_episode_length is not None:
+            limited_env = TimeLimitWrapper(
+                env, max_episode_length, self.cfg.randomize_initial_episode_phase
+            )
+        else:
+            limited_env = env
+        log_env = LogWrapper(limited_env)
         reset_env = AutoResetWrapper(log_env)
         self.vec_env = VecEnv(reset_env)
 

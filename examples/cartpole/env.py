@@ -11,7 +11,6 @@ from asl_rl.env import Environment, Observation
 class CartpoleState:
     q: jnp.ndarray
     v: jnp.ndarray
-    time: int
 
 
 class CartpoleEnv(Environment):
@@ -20,7 +19,8 @@ class CartpoleEnv(Environment):
 
         self.dt_physics = 0.01  # 100 Hz sim
         self.decimation = 5  # 20 Hz control
-        self.max_steps = 1000  # 50 sec
+        # 50 sec; the runner truncates episodes at this length
+        self.max_episode_length = 1000
 
         # Cartpole params based on gymnax
         self.action_scale = 10.0
@@ -33,33 +33,8 @@ class CartpoleEnv(Environment):
         self.total_mass = self.pole_mass + self.cart_mass
         self.pole_mass_x_halflength = self.pole_mass * self.pole_halflength
 
-        self.randomize_episode_phase = True
-
-    # Note: the reset logic is somewhat complicated, but this is just so that we
-    # can randomize the initial episode phase to avoid lockstep. For most examples,
-    # you can just define a single reset()
 
     def reset(self, key: jax.Array, ctx=None) -> tuple[Observation, CartpoleState]:
-        key, phase_key = jax.random.split(key)
-        if self.randomize_episode_phase:
-            # Stagger initial episode phase
-            init_step = jax.random.randint(
-                phase_key, (), 0, self.max_steps, dtype=jnp.int32
-            )
-        else:
-            init_step = jnp.array(0, dtype=jnp.int32)
-        return self._reset(key, init_step)
-
-    def reset_from(
-        self, key: jax.Array, state: CartpoleState, ctx=None
-    ) -> tuple[Observation, CartpoleState]:
-        # At an episode boundary: start a full-length episode from step 0
-        del state
-        return self._reset(key, jnp.array(0, dtype=jnp.int32))
-
-    def _reset(
-        self, key: jax.Array, init_step: jax.Array
-    ) -> tuple[Observation, CartpoleState]:
         key_q, key_v = jax.random.split(key)
         q = jax.random.uniform(
             key_q,
@@ -72,7 +47,7 @@ class CartpoleEnv(Environment):
             q = jnp.array([0.0, jnp.pi + q[1]])
         v = jax.random.uniform(key_v, minval=-0.01, maxval=0.01, shape=(2,))
 
-        state = CartpoleState(q=q, v=v, time=init_step)
+        state = CartpoleState(q=q, v=v)
         return self._get_obs(state), state
 
     def step(
@@ -120,11 +95,11 @@ class CartpoleEnv(Environment):
             integration_step, (state.q, state.v), None, length=self.decimation
         )
 
-        next_state = CartpoleState(q=q_next, v=v_next, time=state.time + 1)
+        next_state = CartpoleState(q=q_next, v=v_next)
         obs = self._get_obs(next_state)
         reward = self._get_reward(next_state.q, next_state.v, action[0])
         terminated = jnp.abs(next_state.q[0]) >= 1.8  # Hit end of rail
-        truncated = next_state.time >= self.max_steps
+        truncated = jnp.bool_(False)  # time limit: max_episode_length (runner)
         info = {}
 
         return obs, next_state, reward, terminated, truncated, info

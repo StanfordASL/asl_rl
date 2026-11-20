@@ -23,6 +23,11 @@ class Observation(NamedTuple):
 
 
 class Environment:
+    max_episode_length: int | None = None
+    """Episode time limit, in env steps. If set, the runner truncates episodes at
+    this length (see TimeLimitWrapper), so step() does not need to track time.
+    None means the env handles its own time limit (or has none)."""
+
     def context(self):
         # (Advanced feature) Static data that is not closed over
         # Usually None for most envs, unless using a large dataset
@@ -52,6 +57,69 @@ class Environment:
         # Size of the action vector. Note: actions are not clipped or scaled by
         # the runner; any action processing is part of the env's step()
         raise NotImplementedError
+
+
+@struct.dataclass
+class TimeLimitState:
+    env_state: Any
+    step: jnp.ndarray  # env steps taken in the current episode
+
+
+class TimeLimitWrapper:
+    """Truncates episodes after `max_episode_length` steps.
+
+    With `randomize_initial_phase`, the first episode of each env (reset) starts
+    with its step counter at a random value in [0, max_episode_length), so envs
+    with only time-out endings do not all end on the same step. Only the
+    counter is randomized; the physical state is a normal reset(). Every later
+    episode (reset_from) starts at 0 and runs the full length. This matches
+    rsl_rl's `init_at_random_ep_len`.
+    """
+
+    def __init__(
+        self,
+        env: Environment,
+        max_episode_length: int,
+        randomize_initial_phase: bool = True,
+    ):
+        if max_episode_length < 1:
+            raise ValueError("max_episode_length must be at least 1")
+        self._env = env
+        self.max_episode_length = int(max_episode_length)
+        self.randomize_initial_phase = randomize_initial_phase
+
+    def reset(self, key: jax.Array, ctx=None) -> tuple[Observation, TimeLimitState]:
+        obs, env_state = self._env.reset(key, ctx)
+        if self.randomize_initial_phase:
+            # fold_in: leaves the key the env sees unchanged
+            phase_key = jax.random.fold_in(key, 0x7153)
+            step = jax.random.randint(
+                phase_key, (), 0, self.max_episode_length, dtype=jnp.int32
+            )
+        else:
+            step = jnp.int32(0)
+        return obs, TimeLimitState(env_state=env_state, step=step)
+
+    def reset_from(
+        self, key: jax.Array, state: TimeLimitState, ctx=None
+    ) -> tuple[Observation, TimeLimitState]:
+        obs, env_state = self._env.reset_from(key, state.env_state, ctx)
+        return obs, TimeLimitState(env_state=env_state, step=jnp.int32(0))
+
+    def step(
+        self, key: jax.Array, state: TimeLimitState, action: jnp.ndarray, ctx=None
+    ) -> tuple[Observation, TimeLimitState, float, bool, bool, dict[str, Any]]:
+        obs, env_state, reward, terminated, truncated, info = self._env.step(
+            key, state.env_state, action, ctx
+        )
+        step = state.step + 1
+        truncated = jnp.logical_or(truncated, step >= self.max_episode_length)
+        next_state = TimeLimitState(env_state=env_state, step=step)
+        return obs, next_state, reward, terminated, truncated, info
+
+    @property
+    def action_dim(self) -> int:
+        return self._env.action_dim
 
 
 @struct.dataclass

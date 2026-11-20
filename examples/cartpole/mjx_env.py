@@ -13,7 +13,6 @@ from asl_rl.env import Environment, Observation
 @struct.dataclass
 class MjxCartpoleState:
     data: mjx.Data
-    time: int
 
 
 class MjxCartpoleEnv(Environment):
@@ -28,35 +27,10 @@ class MjxCartpoleEnv(Environment):
 
         # Note: physics timestep (0.01) is set in the xml
         self.decimation = 5  # 20 Hz control
-        self.max_steps = 1000  # 50 sec
-
-        self.randomize_episode_phase = True
-
-    # Note: the reset logic is somewhat complicated, but this is just so that we
-    # can randomize the initial episode phase to avoid lockstep. For most examples,
-    # you can just define a single reset()
+        # 50 sec; the runner truncates episodes at this length
+        self.max_episode_length = 1000
 
     def reset(self, key: jax.Array, ctx=None) -> tuple[Observation, MjxCartpoleState]:
-        key, phase_key = jax.random.split(key)
-        if self.randomize_episode_phase:
-            # Stagger initial episode phase
-            init_step = jax.random.randint(
-                phase_key, (), 0, self.max_steps, dtype=jnp.int32
-            )
-        else:
-            init_step = jnp.array(0, dtype=jnp.int32)
-        return self._reset(key, init_step)
-
-    def reset_from(
-        self, key: jax.Array, state: MjxCartpoleState, ctx=None
-    ) -> tuple[Observation, MjxCartpoleState]:
-        # At an episode boundary: start a full-length episode from step 0
-        del state
-        return self._reset(key, jnp.array(0, dtype=jnp.int32))
-
-    def _reset(
-        self, key: jax.Array, init_step: jax.Array
-    ) -> tuple[Observation, MjxCartpoleState]:
         key_q, key_v = jax.random.split(key)
         q = jax.random.uniform(
             key_q,
@@ -73,7 +47,7 @@ class MjxCartpoleEnv(Environment):
         )
 
         data = self.data_template.replace(qpos=q, qvel=v)
-        state = MjxCartpoleState(data=mjx.forward(self.mjx_model, data), time=init_step)
+        state = MjxCartpoleState(data=mjx.forward(self.mjx_model, data))
         return self._get_obs(state), state
 
     def step(
@@ -90,11 +64,11 @@ class MjxCartpoleEnv(Environment):
             length=self.decimation,
         )[0]
 
-        next_state = MjxCartpoleState(data=new_data, time=state.time + 1)
+        next_state = MjxCartpoleState(data=new_data)
         obs = self._get_obs(next_state)
         reward = self._get_reward(next_state.data.qpos, next_state.data.qvel, action[0])
         terminated = jnp.abs(next_state.data.qpos[0]) >= 1.8  # Hit end of rail
-        truncated = next_state.time >= self.max_steps
+        truncated = jnp.bool_(False)  # time limit: max_episode_length (runner)
         info = {}
 
         return obs, next_state, reward, terminated, truncated, info

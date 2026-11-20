@@ -56,6 +56,11 @@ class PPOConfig:
     init_std: float = 1.0
     """Initial standard deviation for the Gaussian policy"""
 
+    # Episodes
+    randomize_initial_episode_phase: bool = True
+    """For envs that set max_episode_length: start each env's first episode at a random
+    step so time-outs don't happen in lockstep (rsl_rl's init_at_random_ep_len)"""
+
     # Misc
     obs_normalization: bool = False
     """Whether to normalize the observations"""
