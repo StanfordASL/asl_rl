@@ -73,7 +73,10 @@ def export_to_onnx(
         ],
         initializer=initializers,
     )
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", OPSET)])
+    opsets = [helper.make_opsetid("", OPSET)]
+    model = helper.make_model(
+        graph, opset_imports=opsets, ir_version=helper.find_min_ir_version_for(opsets)
+    )
     onnx.checker.check_model(model)
     onnx.save(model, path)
     return model
