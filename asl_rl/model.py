@@ -1,6 +1,5 @@
 from collections.abc import Callable, Sequence
 
-import distrax
 import flax.linen as nn
 import jax.numpy as jnp
 from flax.linen.initializers import constant, orthogonal
@@ -28,7 +27,9 @@ class ActorCritic(nn.Module):
     @nn.compact
     def __call__(
         self, actor_obs: jnp.ndarray, critic_obs: jnp.ndarray = None
-    ) -> tuple[distrax.Distribution, jnp.ndarray]:
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        # Returns (action_mean, action_std, value): a diagonal Gaussian policy
+        # with mean and std of shape (..., action_dim), and value of shape (...)
         if critic_obs is None:
             critic_obs = actor_obs
 
@@ -50,12 +51,7 @@ class ActorCritic(nn.Module):
             ),
             (self.action_dim,),
         )
-        action_std = jnp.exp(log_std)
-
-        # Diagonal Gaussian distribution for action policy
-        action_dist = distrax.MultivariateNormalDiag(
-            loc=action_mean, scale_diag=action_std
-        )
+        action_std = jnp.broadcast_to(jnp.exp(log_std), action_mean.shape)
 
         # Critic MLP
         critic_x = self._mlp(critic_obs, act_fn, self.critic_hidden_dims)
@@ -64,4 +60,4 @@ class ActorCritic(nn.Module):
         )
         value = jnp.squeeze(value, axis=-1)
 
-        return action_dist, value
+        return action_mean, action_std, value

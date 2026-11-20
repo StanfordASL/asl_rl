@@ -60,7 +60,7 @@ def load_policy(
     def policy(obs: jax.Array) -> jax.Array:
         if normalize:
             obs = normalize_obs(normalizer, obs)
-        action_dist, _ = network.apply({"params": params}, obs, critic_dummy)
-        return action_dist.mean()
+        mean, _, _ = network.apply({"params": params}, obs, critic_dummy)
+        return mean
 
     return policy, obs_dim

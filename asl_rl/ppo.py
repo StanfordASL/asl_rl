@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -59,6 +60,26 @@ def calculate_gae(
     return advantages, returns
 
 
+# Diagonal Gaussian policy
+
+_LOG_2PI = math.log(2.0 * math.pi)
+
+
+def gaussian_sample(key: jax.Array, mean: jnp.ndarray, std: jnp.ndarray) -> jnp.ndarray:
+    return mean + std * jax.random.normal(key, mean.shape, mean.dtype)
+
+
+def gaussian_log_prob(
+    mean: jnp.ndarray, std: jnp.ndarray, x: jnp.ndarray
+) -> jnp.ndarray:
+    z = (x - mean) / std
+    return -jnp.sum(0.5 * jnp.square(z) + jnp.log(std) + 0.5 * _LOG_2PI, axis=-1)
+
+
+def gaussian_entropy(std: jnp.ndarray) -> jnp.ndarray:
+    return jnp.sum(jnp.log(std) + 0.5 * (1.0 + _LOG_2PI), axis=-1)
+
+
 def gaussian_kl(
     old_mean: jnp.ndarray,
     old_std: jnp.ndarray,
@@ -80,11 +101,9 @@ def ppo_loss_fn(
     batch: Batch,
     cfg: PPOConfig,
 ) -> tuple[jnp.ndarray, dict[str, jnp.ndarray]]:
-    action_dist, values = apply_fn(
-        {"params": params}, batch.obs.actor, batch.obs.critic
-    )
-    log_probs = action_dist.log_prob(batch.action)
-    entropy = action_dist.entropy().mean()
+    mean, std, values = apply_fn({"params": params}, batch.obs.actor, batch.obs.critic)
+    log_probs = gaussian_log_prob(mean, std, batch.action)
+    entropy = gaussian_entropy(std).mean()
 
     # Policy surrogate loss
     ratio = jnp.exp(log_probs - batch.log_prob)
@@ -106,9 +125,7 @@ def ppo_loss_fn(
         value_loss = jnp.square(values - batch.target).mean()
 
     # KL from the rollout policy, for the adaptive learning rate and logging
-    kl = jnp.mean(
-        gaussian_kl(batch.mean, batch.std, action_dist.mean(), action_dist.stddev())
-    )
+    kl = jnp.mean(gaussian_kl(batch.mean, batch.std, mean, std))
 
     # Total PPO loss
     total_loss = (

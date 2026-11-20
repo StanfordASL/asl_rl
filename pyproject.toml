@@ -9,7 +9,7 @@ description = "A minimal, performant implementation of PPO in JAX"
 authors = [{ name = "Daniel Morton", email = "danielpmorton@gmail.com" }]
 readme = "README.md"
 keywords = ["rl", "ppo", "robot", "control"]
-dependencies = ["distrax", "flax", "jax", "numpy", "optax"]
+dependencies = ["flax", "jax", "numpy", "optax"]
 
 [project.optional-dependencies]
 cuda13 = ["jax[cuda13]"]

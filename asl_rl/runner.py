@@ -15,7 +15,15 @@ from asl_rl.config import PPOConfig
 from asl_rl.env import DEVICE_AXIS, AutoResetWrapper, LogWrapper, Observation, VecEnv
 from asl_rl.model import ActorCritic
 from asl_rl.normalizer import init_normalizer, normalize_obs, update_normalizer
-from asl_rl.ppo import Batch, calculate_gae, get_lr, make_optimizer, ppo_update
+from asl_rl.ppo import (
+    Batch,
+    calculate_gae,
+    gaussian_log_prob,
+    gaussian_sample,
+    get_lr,
+    make_optimizer,
+    ppo_update,
+)
 from asl_rl.utils import replicate_attrs
 
 # Theses keys are used by the LogWrapper in env.py
@@ -66,11 +74,9 @@ def _collect_rollout(
 
         # Query policy distribution and sample actions
         action_key, env_key = jax.random.split(step_key)
-        action_dist, value = apply_fn(
-            {"params": params}, norm_obs.actor, norm_obs.critic
-        )
-        action = action_dist.sample(seed=action_key)
-        log_prob = action_dist.log_prob(action)
+        mean, std, value = apply_fn({"params": params}, norm_obs.actor, norm_obs.critic)
+        action = gaussian_sample(action_key, mean, std)
+        log_prob = gaussian_log_prob(mean, std, action)
 
         # Environment step
         keys_step = jax.random.split(env_key, num_envs)
@@ -85,8 +91,8 @@ def _collect_rollout(
             value=value,
             reward=reward,
             log_prob=log_prob,
-            mean=action_dist.mean(),
-            std=action_dist.stddev(),
+            mean=mean,
+            std=std,
             obs=last_obs,
             info=info,
         )
@@ -236,7 +242,8 @@ class OnPolicyRunner:
         )
 
         # Allow for passing custom network. Expects call structure:
-        # (actor_obs, critic_obs) -> (action_distribution, value)
+        # (actor_obs, critic_obs) -> (action_mean, action_std, value), a diagonal
+        # Gaussian policy with mean/std of shape (..., action_dim)
         if network is None:
             # Otherwise, just use our standard actor/critic structure
             network = ActorCritic(
@@ -298,7 +305,7 @@ class OnPolicyRunner:
                 if self.obs_normalization
                 else next_obs
             )
-            _, last_val = self.network.apply(
+            _, _, last_val = self.network.apply(
                 {"params": train_state.params},
                 norm_last_obs.actor,
                 norm_last_obs.critic,
